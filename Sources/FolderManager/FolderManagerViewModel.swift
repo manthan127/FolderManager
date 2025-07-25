@@ -11,7 +11,13 @@ import UniformTypeIdentifiers
 public final class FolderManagerViewModel: ObservableObject {
     @Published public var folders: [URL] = []
 
-    private let storageKey = "SavedFolders"
+    private let storageFilename = "folderBookmarks.plist"
+    private var bookmarkFileURL: URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("FolderManager", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent(storageFilename)
+    }
 
     public init() {
         loadFolders()
@@ -30,24 +36,51 @@ public final class FolderManagerViewModel: ObservableObject {
 
     public func addFolder(_ url: URL) {
         guard url.isFileURL, url.hasDirectoryPath else { return }
-        if !folders.contains(url) {
+        guard !folders.contains(url) else { return }
+
+        do {
+            let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
             folders.append(url)
-            saveFolders()
+            saveBookmarks()
+        } catch {
+            print("Failed to create bookmark: \(error)")
         }
     }
 
     public func removeFolder(_ url: URL) {
         folders.removeAll { $0 == url }
-        saveFolders()
+        saveBookmarks()
     }
 
-    private func saveFolders() {
-        let paths = folders.map(\.path)
-        UserDefaults.standard.set(paths, forKey: storageKey)
+    private func saveBookmarks() {
+        let bookmarkDataArray: [Data] = folders.compactMap { url in
+            try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
+        }
+
+        do {
+            let data = try PropertyListEncoder().encode(bookmarkDataArray)
+            try data.write(to: bookmarkFileURL, options: .atomic)
+        } catch {
+            print("Failed to save bookmarks: \(error)")
+        }
     }
 
     private func loadFolders() {
-        guard let paths = UserDefaults.standard.array(forKey: storageKey) as? [String] else { return }
-        folders = paths.map { URL(fileURLWithPath: $0) }
+        guard let data = try? Data(contentsOf: bookmarkFileURL),
+              let bookmarkDataArray = try? PropertyListDecoder().decode([Data].self, from: data) else {
+            return
+        }
+
+        for bookmarkData in bookmarkDataArray {
+            var isStale = false
+            do {
+                let url = try URL(resolvingBookmarkData: bookmarkData, options: [.withSecurityScope], bookmarkDataIsStale: &isStale)
+                if isStale { continue }
+
+                folders.append(url)
+            } catch {
+                print("Failed to resolve bookmark: \(error)")
+            }
+        }
     }
 }
