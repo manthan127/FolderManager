@@ -23,14 +23,16 @@ public final class FolderManagerViewModel: ObservableObject {
         loadFolders()
     }
 
-    public func pickFolder() {
+    public func pickFolder(filter: ((URL) -> Bool)?) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
 
         if panel.runModal() == .OK, let url = panel.url {
-            addFolder(url)
+            if filter?(url) ?? true {
+                addFolder(url)
+            }
         }
     }
 
