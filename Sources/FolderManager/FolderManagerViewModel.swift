@@ -11,7 +11,7 @@ import UniformTypeIdentifiers
 public final class FolderManagerViewModel: ObservableObject {
     @Published public var folders: [URL] = []
 
-    private let storageFilename = "folderBookmarks.plist"
+    private let storageFilename: String
     private var bookmarkFileURL: URL {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = appSupport.appendingPathComponent("FolderManager", isDirectory: true)
@@ -19,55 +19,60 @@ public final class FolderManagerViewModel: ObservableObject {
         return dir.appendingPathComponent(storageFilename)
     }
 
-    public init() {
+    /// Initializes a new instance, optionally with a custom storage filename.
+    ///
+    /// After setting the filename, it loads the folders from the specified storage.
+    ///
+    /// - Parameter storageFilename: An optional custom filename for storing bookmarks.
+    ///   If `nil` or blank, defaults to `"folderBookmarks.plist"`.
+    public init(storageFilename: String? = nil) {
+        self.storageFilename = storageFilename.nonEmptyTrimmed ?? "folderBookmarks.plist"
+        
         loadFolders()
     }
 
-    public func pickFolder(filter: ((URL) -> Bool)?) {
+    public func pickFolder(filter: ((URL) -> Bool)?) throws {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
 
-        if panel.runModal() == .OK, let url = panel.url {
-            if filter?(url) ?? true {
-                addFolder(url)
-            }
+        if panel.runModal() == .OK, let url = panel.url, filter?(url) ?? true {
+            try addFolder(url)
         }
     }
-
-    public func addFolder(_ url: URL) {
-        guard url.isFileURL, url.hasDirectoryPath else { return }
-        guard !folders.contains(url) else { return }
-
-        do {
-            let bookmark = try url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
-            folders.append(url)
-            saveBookmarks()
-        } catch {
-            print("Failed to create bookmark: \(error)")
-        }
+    
+    public func addFolders(_ urls: [URL]) throws {
+        folders += Set(urls).filter{ $0.isFileURL && $0.hasDirectoryPath && !folders.contains($0) }
+        
+        try saveBookmarks()
     }
 
-    public func removeFolder(_ url: URL) {
+    public func addFolder(_ url: URL) throws {
+        guard url.isFileURL, url.hasDirectoryPath, !folders.contains(url) else { return }
+
+        folders.append(url)
+        try saveBookmarks()
+    }
+
+    public func removeFolder(_ url: URL) throws {
         folders.removeAll { $0 == url }
-        saveBookmarks()
+        try saveBookmarks()
     }
+}
 
-    private func saveBookmarks() {
+private extension FolderManagerViewModel {
+    func saveBookmarks() throws {
         let bookmarkDataArray: [Data] = folders.compactMap { url in
             try? url.bookmarkData(options: [.withSecurityScope], includingResourceValuesForKeys: nil, relativeTo: nil)
         }
 
-        do {
-            let data = try PropertyListEncoder().encode(bookmarkDataArray)
-            try data.write(to: bookmarkFileURL, options: .atomic)
-        } catch {
-            print("Failed to save bookmarks: \(error)")
-        }
+        let data = try PropertyListEncoder().encode(bookmarkDataArray)
+        try data.write(to: bookmarkFileURL, options: .atomic)
     }
 
-    private func loadFolders() {
+    // TODO: - this function may cause hang if there are to many data or the file is big
+    func loadFolders() {
         guard let data = try? Data(contentsOf: bookmarkFileURL),
               let bookmarkDataArray = try? PropertyListDecoder().decode([Data].self, from: data) else {
             return
@@ -84,5 +89,15 @@ public final class FolderManagerViewModel: ObservableObject {
                 print("Failed to resolve bookmark: \(error)")
             }
         }
+    }
+}
+
+
+extension Optional where Wrapped == String {
+    var nonEmptyTrimmed: String? {
+        if let self {
+            if self.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { nil }
+            else { self }
+        } else { nil }
     }
 }

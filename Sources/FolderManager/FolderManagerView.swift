@@ -9,14 +9,22 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 public struct FolderManagerView<Destination: View>: View {
-    @StateObject private var viewModel = FolderManagerViewModel()
-    let destinationBuilder: (URL) -> Destination
-    let filter: ((URL) -> Bool)?
-    @State private var url: URL?
+    @StateObject private var viewModel: FolderManagerViewModel
     
-    public init(filter: ((URL) -> Bool)? = nil, destination: @escaping (URL) -> Destination) {
+    let filter: ((URL) -> Bool)?
+    let onError: ((Error) -> ())?
+    let destinationBuilder: (URL) -> Destination
+    
+    public init(
+        storageFilename: String? = nil,
+        filter: ((URL) -> Bool)? = nil,
+        onError: ((Error) -> ())? = nil,
+        destination: @escaping (URL) -> Destination
+    ) {
         self.destinationBuilder = destination
         self.filter = filter
+        self.onError = onError
+        self._viewModel = StateObject(wrappedValue: FolderManagerViewModel.init(storageFilename: storageFilename))
     }
     
     public var body: some View {
@@ -24,7 +32,11 @@ public struct FolderManagerView<Destination: View>: View {
             VStack(alignment: .leading) {
                 HStack {
                     Button("Choose Folder") {
-                        viewModel.pickFolder(filter: filter)
+                        do {
+                            try viewModel.pickFolder(filter: filter)
+                        } catch {
+                            onError?(error)
+                        }
                     }
                     
                     Spacer()
@@ -39,7 +51,11 @@ public struct FolderManagerView<Destination: View>: View {
                             Spacer()
                             
                             Button(action: {
-                                viewModel.removeFolder(folder)
+                                do {
+                                    try viewModel.removeFolder(folder)
+                                } catch {
+                                    onError?(error)
+                                }
                             }) {
                                 Image(systemName: "trash")
                             }
@@ -48,8 +64,10 @@ public struct FolderManagerView<Destination: View>: View {
                     }
                 }
                 .onFileDrop(allowedFormats: [UTType.directory], filter: filter) { urls in
-                    for url in urls {
-                        viewModel.addFolder(url)
+                    do {
+                        try viewModel.addFolders(urls)
+                    } catch {
+                        onError?(error)
                     }
                 }
                 
